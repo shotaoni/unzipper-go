@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: unzip uploaded zip file to another S3 bucket
+# 環境変数はtemplate.yml内で直接記述せずにsam deployコマンドの引数として
+# 渡すこともできる
+Parameters:
+  ZippedArtifactBucket:
+    Type: String
+  UnzippedArtifactBucket:
+    Type: String
+Resources:
+  Unzipper: #リソース名,他のリソースから参照できる
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri:
+        # articactフォルダー配下のビルド済みの実行ファイルを利用すると言う設定です
+        # ローカルだけでなくs3のバケットも指定できます
+        artifact
+      Handler:
+        # artifact配下の実行ファイルの名前を指定
+        unzipper
+      Runtime:
+        # lambdaを記述する言語、他にはnodejs6.10/8.10,java8,python2.7/3.6/3.7
+        # dotnetcore1.0/2.0/2.1,ruby2.5など
+        go1.x
+      Timeout:
+        # タイムアウトまでの時間を秒で設定
+        # 設定しない場合デフォルトの3秒になる
+        180
+      Policies: #lambdaから他のリソースを扱うための権限を設定します
+      - S3CrudPolicy:
+          BucketName: !Ref ZippedArtifactBucket
+      - S3CrudPolicy:
+          BucketName: !Ref UnzippedArtifactBucket
+      Environment:
+        Variables: #環境変数の設定
+          UNZIPPED_ARTIFACT_BUCKET: !Ref UnzippedArtifactBucket
+      Tracing:
+        # AWS X-Rayを有効化できる、複数AWSリソースのトレーシングに便利
+        Active
+      Events: # lambdaのトリガーとなるイベントを設定する
+        UploadedEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref Zipped
+            Events: s3:ObjectCreated:Put
+# cloudwatch logsのロググループは定義しなくてもlambdaの初回実行時に作成されるが、
+# スタックの一部として管理するため明示的に定義する
+# 定義せずに作成されるとスタックの削除時に一緒に削除されない
+  UnzipperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # LoggroupNameを別の名前にしても
+      # この名前でロググループが作成されてそちらに書き込まれます
+      LogGroupName: !Sub /aws/lambda/${Unzipper}
+      # ログは従量課金のため１日で消える設定にする、指定できる日数には制限がある
+      # https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html#API_PutRetentionPolicy_RequestSyntax
+      # 指定しなければ無制限になる
+      RetentionInDays: 1
+    # AWS::Serverless::Funcion以外は通常のcloudFormationの記法
+  Zipped:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ZippedArtifactBucket
+  Unzipped:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref UnzippedArtifactBucket
